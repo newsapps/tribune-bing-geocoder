@@ -1,11 +1,17 @@
 import https from 'https';
 import querystring from 'querystring';
+import url from 'url';
+
+import jsonp from 'jsonp';
 
 const BING_GEOCODER_API_URL = 'https://dev.virtualearth.net/REST/v1/Locations';
 
 export class BingGeocoder {
-  constructor(bingApiKey=undefined, url=BING_GEOCODER_API_URL) {
-    this.url = url;
+  constructor(bingApiKey=undefined, endpointUrl=BING_GEOCODER_API_URL, options) {
+    this.options = Object.assign({
+      disableJsonp: false
+    }, options);
+    this.endpointUrl = endpointUrl;
     this.bingApiKey = bingApiKey;
   }
 
@@ -16,11 +22,32 @@ export class BingGeocoder {
     if (this.bingApiKey) {
       queryParams.key = this.bingApiKey;
     }
+
     Object.assign(queryParams, params);
 
-    let url = this.url + '?' + querystring.stringify(queryParams);
+    let endpointUrl = this.endpointUrl + '?' + querystring.stringify(queryParams);
 
-    https.get(url, (res) => {
+    if (process.browser && !this.options.disableJsonp) {
+      this._requestJsonp(endpointUrl, callback);
+    }
+    else {
+      this._request(endpointUrl, callback); 
+    }
+  }
+
+  _request(endpointUrl, callback) {
+    let requestOpts = url.parse(endpointUrl);
+    // Disable credentials when in browser
+    // See http://stackoverflow.com/a/24443043/386210
+    //
+    // This is needed to get around annoying CORS behavior in our
+    // AWS API Gateway/AWS Lambda Function proxy for the Bing API.
+    // Browsers don't allow Access-Allow-Origin: '*' when credentials
+    // are sent.  So, don't send credentials.
+    //
+    requestOpts.withCredentials = false;
+
+    https.get(requestOpts, (res) => {
       let data = '';
 
       res.on('data', (chunk) => {
@@ -34,5 +61,13 @@ export class BingGeocoder {
     }).on('error', (e) => {
       callback(e);
     });
+  }
+
+  _requestJsonp(endpointUrl, callback) {
+    jsonp(endpointUrl, {
+      // Bing's API expects the jsonp callback name to be specified in
+      // a jsonp query string parameter
+      param: 'jsonp'
+    }, callback); 
   }
 }
